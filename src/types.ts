@@ -19,10 +19,9 @@ export interface Todo {
   importance: Importance;
   createdAt: string;
   dueDate: string | null;
-
-  // --- NEW FIELDS ---
-  project?: string;         // e.g., Work / Personal
-  tags?: string[];          // flexible labels like #urgent
-  recurrence?: Recurrence;  // repeat schedule
+  project?: string;
+  tags?: string[];
+  recurrence?: Recurrence;
   attachments?: Attachment[];
+  priority?: string; // <-- Add this line if you use priority
 }
