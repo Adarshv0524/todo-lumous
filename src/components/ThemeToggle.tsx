@@ -1,5 +1,4 @@
 // src/components/ThemeToggle.tsx
-import React from 'react';
 
 export default function ThemeToggle({ theme, setTheme }: { theme: 'dark' | 'light', setTheme: (t: 'dark'|'light') => void }) {
   const toggle = () => setTheme(theme === 'dark' ? 'light' : 'dark');

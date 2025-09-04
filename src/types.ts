@@ -1,5 +1,5 @@
 // src/types.ts
-export type Importance = 'urgent' | 'planned' | 'optional';
+export type Importance = "urgent" | "planned" | "optional" | "focus";
 
 // Recurrence options
 export type Recurrence = 'none' | 'daily' | 'weekly' | 'custom';
