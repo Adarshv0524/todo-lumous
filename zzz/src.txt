@@ -1,0 +1,1514 @@
+App.css
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+}
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
+}
+
+-------------
+App.tsx
+// src/App.jsx
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import useLocalStorage from './hooks/useLocalStorage';
+import ThemeToggle from './components/ThemeToggle';
+import TodoForm from './components/TodoForm';
+import TodoList from './components/TodoList';
+import { exportTodosAsJson, parseTodosFile } from './utils/io';
+
+export default function App() {
+  const [todos, setTodos] = useLocalStorage('todos', []);
+  const [filter, setFilter] = useState('all');
+  const remaining = todos.filter(t => !t.completed).length;
+
+  // NEW: State for mobile navigation
+  const [isNavOpen, setIsNavOpen] = useState(false);
+
+  const importInputRef = useRef(null);
+
+  const [theme, setTheme] = useLocalStorage('theme', 'dark');
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
+  // --- Actions ---
+  const addTodo = (payload) => {
+    const newTodo = {
+      id: Date.now().toString() + '-' + Math.random().toString(36).slice(2, 8),
+      title: payload.title.trim(),
+      notes: payload.notes || '',
+      completed: false,
+      importance: payload.importance || 'planned',
+      createdAt: new Date().toISOString(),
+      dueDate: payload.dueDate || null,
+      project: payload.project || 'General',
+      tags: payload.tags || [],
+      recurrence: payload.recurrence || 'none',
+      attachments: payload.attachments || [],
+    };
+    setTodos((prev) => [newTodo, ...prev]);
+  };
+
+
+  const toggle = (id) => setTodos(prev =>
+    prev.map(t => t.id === id ? { ...t, completed: !t.completed } : t)
+  );
+
+  const [lastDeleted, setLastDeleted] = useState(null);
+
+  const remove = (id) => {
+    setTodos(prev => {
+      const toDelete = prev.find(t => t.id === id);
+      if (toDelete) setLastDeleted(toDelete);
+      return prev.filter(t => t.id !== id);
+    });
+  };
+
+  const undoDelete = () => {
+    if (lastDeleted) {
+      setTodos(prev => [lastDeleted, ...prev]);
+      setLastDeleted(null);
+    }
+  };
+
+  const edit = (id, updates) => setTodos(prev =>
+    prev.map(t => t.id === id ? { ...t, ...updates } : t)
+  );
+
+  const clearCompleted = () => setTodos(prev => prev.filter(t => !t.completed));
+
+  const filtered = useMemo(() => {
+    if (filter === 'active') return todos.filter(t => !t.completed);
+    if (filter === 'done') return todos.filter(t => t.completed);
+    return todos;
+  }, [todos, filter]);
+
+  const [sortDue, setSortDue] = useState(false);
+
+  const sorted = useMemo(() => {
+    let list = filtered;
+    if (sortDue) {
+      list = [...list].sort((a, b) => {
+        if (!a.dueDate) return 1;
+        if (!b.dueDate) return -1;
+        return new Date(a.dueDate) - new Date(b.dueDate);
+      });
+    }
+    return list;
+  }, [filtered, sortDue]);
+
+  const [search, setSearch] = useState('');
+  const searched = useMemo(() => {
+    if (!search.trim()) return sorted;
+    return sorted.filter(t => t.title.toLowerCase().includes(search.toLowerCase()));
+  }, [sorted, search]);
+
+  const handleExport = () => {
+    const ok = exportTodosAsJson(todos);
+    if (!ok) alert('Export failed. Check console for details.');
+  };
+
+  const handleOpenImportDialog = () => {
+    importInputRef.current?.click();
+  };
+
+  const handleImportFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const imported = await parseTodosFile(file);
+      if (!Array.isArray(imported) || imported.length === 0) {
+        alert('No valid tasks found in file.');
+        return;
+      }
+      const existingIds = new Set(todos.map(t => t.id));
+      const sanitized = imported.map((t) => {
+        const id = t.id && !existingIds.has(t.id) ? t.id : (Date.now().toString() + '-' + Math.random().toString(36).slice(2, 6));
+        return {
+          id,
+          title: t.title || 'Untitled task',
+          completed: !!t.completed,
+          priority: t.priority || 'normal',
+          notes: t.notes || '',
+          createdAt: t.createdAt || new Date().toISOString(),
+          dueDate: t.dueDate || null,
+        };
+      });
+      setTodos(prev => [...sanitized, ...prev]);
+      alert(`Imported ${sanitized.length} task(s).`);
+    } catch (err) {
+      console.error('Import failed', err);
+      alert('Import failed: ' + (err.message || 'Invalid file'));
+    }
+  };
+
+  useEffect(() => {
+    const handler = (ev) => {
+      const isMod = ev.ctrlKey || ev.metaKey;
+      if (isMod && ev.key.toLowerCase() === 'k') {
+        ev.preventDefault();
+        const el = document.querySelector('[aria-label="New todo"]');
+        if (el) el.focus();
+        return;
+      }
+      if (isMod && ev.shiftKey && ev.key.toLowerCase() === 'e') {
+        ev.preventDefault();
+        handleExport();
+        return;
+      }
+      if (isMod && ev.shiftKey && ev.key.toLowerCase() === 'i') {
+        ev.preventDefault();
+        handleOpenImportDialog();
+        return;
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [todos]);
+
+  useEffect(() => {
+    document.title = "Todo App";
+  }, []);
+
+  return (
+    // UPDATED: Added conditional class for mobile nav
+    <div className={`app-root ${isNavOpen ? 'is-nav-open' : ''}`}>
+      <header className="app-header">
+        {/* NEW: Hamburger menu button */}
+        <button className="mobile-menu-toggle" onClick={() => setIsNavOpen(true)} aria-label="Open menu">
+          ☰
+        </button>
+
+        <h1>Todo App</h1>
+        <div className="meta">
+          <span>{remaining} remaining</span>
+          <span>{todos.filter(t => t.completed).length} done</span>
+          <ThemeToggle theme={theme} setTheme={setTheme} />
+        </div>
+      </header>
+      
+      {/* NEW: Mobile Nav Panel and Overlay */}
+      <div className="nav-overlay" onClick={() => setIsNavOpen(false)}></div>
+      <aside className="mobile-nav-panel">
+        <div>
+          <h3>Filters</h3>
+          <nav className="filters-nav">
+            <button
+              className={filter === 'all' ? 'active' : ''}
+              onClick={() => { setFilter('all'); setIsNavOpen(false); }}
+            >All</button>
+            <button
+              className={filter === 'active' ? 'active' : ''}
+              onClick={() => { setFilter('active'); setIsNavOpen(false); }}
+            >Active</button>
+            <button
+              className={filter === 'done' ? 'active' : ''}
+              onClick={() => { setFilter('done'); setIsNavOpen(false); }}
+            >Done</button>
+          </nav>
+        </div>
+        <div>
+            <h3>Actions</h3>
+            <div className="action-buttons">
+                <button onClick={() => { setTodos(prev => prev.map(t => ({...t, completed: true}))); setIsNavOpen(false); }}>
+                  Mark all done
+                </button>
+                <button onClick={() => { clearCompleted(); setIsNavOpen(false); }}>
+                  Clear completed
+                </button>
+                <button onClick={() => { setSortDue(s => !s); setIsNavOpen(false); }}>
+                  {sortDue ? "Unsort" : "Sort by due"}
+                </button>
+                <button onClick={() => { handleExport(); setIsNavOpen(false); }}>
+                  Export
+                </button>
+                <button onClick={() => { handleOpenImportDialog(); setIsNavOpen(false); }}>
+                  Import
+                </button>
+            </div>
+        </div>
+      </aside>
+
+      <div className="app-layout">
+        {/* Left Sidebar (for desktop) */}
+        <aside className="sidebar-left">
+          <nav className="filters-nav">
+            <button
+              aria-pressed={filter === 'all'}
+              className={filter === 'all' ? 'active' : ''}
+              onClick={() => setFilter('all')}
+            >All</button>
+            <button
+              aria-pressed={filter === 'active'}
+              className={filter === 'active' ? 'active' : ''}
+              onClick={() => setFilter('active')}
+            >Active</button>
+            <button
+              aria-pressed={filter === 'done'}
+              className={filter === 'done' ? 'active' : ''}
+              onClick={() => setFilter('done')}
+            >Done</button>
+          </nav>
+        </aside>
+
+        {/* Main Content */}
+        <main className="main-content">
+          <TodoForm onAdd={addTodo} />
+          
+          <div className="search-bar">
+            <input
+              type="search"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="🔍 Search tasks..."
+            />
+          </div>
+
+          <TodoList todos={searched} onToggle={toggle} onDelete={remove} onEdit={edit} />
+          
+          {lastDeleted && (
+            <div className="undo-delete">
+              <button onClick={undoDelete}>Undo delete</button>
+            </div>
+          )}
+        </main>
+
+        {/* Right Sidebar (for desktop) */}
+        <aside className="sidebar-right">
+          <div className="action-buttons">
+            <button onClick={() => setTodos(prev => prev.map(t => ({...t, completed: true})))}>
+              Mark all done
+            </button>
+            <button onClick={clearCompleted}>
+              Clear completed
+            </button>
+            <button onClick={() => setSortDue(s => !s)}>
+              {sortDue ? "Unsort" : "Sort by due"}
+            </button>
+            <button onClick={handleExport}>
+              Export
+            </button>
+            <button onClick={handleOpenImportDialog}>
+              Import
+            </button>
+          </div>
+        </aside>
+      </div>
+
+      <footer className="app-footer futuristic-footer">
+        <span className="footer-text">Made by <span className="footer-author">Adarsh</span></span>
+      </footer>
+      {/* Hidden file input for imports */}
+      <input
+        type="file"
+        ref={importInputRef}
+        onChange={handleImportFile}
+        accept=".json,application/json"
+        style={{ display: 'none' }}
+      />
+    </div>
+  );
+}
+-------------
+index.css
+:root {
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light dark;
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #242424;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  font-weight: 500;
+  color: #646cff;
+  text-decoration: inherit;
+}
+a:hover {
+  color: #535bf2;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  place-items: center;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+h1 {
+  font-size: 3.2em;
+  line-height: 1.1;
+}
+
+button {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+  background-color: #1a1a1a;
+  cursor: pointer;
+  transition: border-color 0.25s;
+}
+button:hover {
+  border-color: #646cff;
+}
+button:focus,
+button:focus-visible {
+  outline: 4px auto -webkit-focus-ring-color;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color: #213547;
+    background-color: #ffffff;
+  }
+  a:hover {
+    color: #747bff;
+  }
+  button {
+    background-color: #f9f9f9;
+  }
+}
+
+-------------
+main.jsx
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App';
+import './styles/styles.css';
+
+createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+
+-------------
+main.tsx
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import App from "./App.tsx";
+import './styles/styles.css';
+
+createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+
+-------------
+types.ts
+// src/types.ts
+export type Importance = "urgent" | "planned" | "optional" | "focus";
+
+// Recurrence options
+export type Recurrence = 'none' | 'daily' | 'weekly' | 'custom';
+
+export interface Attachment {
+  id: string;
+  type: 'file' | 'link';
+  url: string;
+  name: string;   // display name
+}
+
+export interface Todo {
+  id: string;
+  title: string;
+  notes?: string;
+  completed: boolean;
+  importance: Importance;
+  createdAt: string;
+  dueDate: string | null;
+  project?: string;
+  tags?: string[];
+  recurrence?: Recurrence;
+  attachments?: Attachment[];
+  priority?: string; // <-- Add this line if you use priority
+}
+
+-------------
+vite-env.d.ts
+/// <reference types="vite/client" />
+
+-------------
+components\ThemeToggle.tsx
+// src/components/ThemeToggle.tsx
+
+export default function ThemeToggle({ theme, setTheme }: { theme: 'dark' | 'light', setTheme: (t: 'dark'|'light') => void }) {
+  const toggle = () => setTheme(theme === 'dark' ? 'light' : 'dark');
+
+  return (
+    <button
+      onClick={toggle}
+      aria-pressed={theme === 'light'}
+      aria-label={theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
+      title={theme === 'light' ? 'Light theme' : 'Dark theme'}
+      className="theme-toggle"
+    >
+      {theme === 'light' ? (
+        // Sun icon
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path d="M12 4V2M12 22v-2M4.22 4.22 2.81 2.81M21.19 21.19l-1.41-1.41M4 12H2M22 12h-2M4.22 19.78 2.81 21.19M21.19 2.81 19.78 4.22" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+          <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="1.6"/>
+        </svg>
+      ) : (
+        // Moon icon
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      )}
+    </button>
+  );
+}
+
+-------------
+components\ThreeScene.jsx
+
+-------------
+components\ThreeSceneFull.jsx
+
+-------------
+components\TodoForm.tsx
+import React, { useEffect, useRef, useState } from 'react';
+import type { Importance } from '../types';
+
+export default function TodoForm({ onAdd }: { onAdd: (payload: { title: string; importance?: Importance; dueDate?: string | null; notes?: string }) => void }) {
+  const [title, setTitle] = useState('');
+  const [importance, setImportance] = useState<Importance>('focus');
+  const [dueDate, setDueDate] = useState<string>('');
+  const [notes, setNotes] = useState('');
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim()) return;
+    onAdd({ title, importance, dueDate: dueDate || null, notes });
+    setTitle('');
+    setImportance('focus');
+    setDueDate('');
+    setNotes('');
+  };
+
+  return (
+    <form className="todo-form" onSubmit={submit}>
+      <input
+        ref={inputRef}
+        aria-label="New todo"
+        placeholder="What do you want to do?"
+        value={title}
+        onChange={e => setTitle(e.target.value)}
+        autoComplete="off"
+      />
+      <select
+        aria-label="Importance"
+        value={importance}
+        onChange={e => setImportance(e.target.value as Importance)}
+        style={{ minWidth: 90 }}
+      >
+        <option value="urgent">🔥 Urgent</option>
+        <option value="planned">📅 Planned</option>
+        <option value="optional">🌱 Optional</option>
+      </select>
+      <div className="date-group">
+        <input
+          type="date"
+          aria-label="Due date"
+          value={dueDate}
+          onChange={e => setDueDate(e.target.value)}
+          placeholder=" "
+          style={{ minWidth: 110 }}
+        />
+        <label>Due date</label>
+      </div>
+      <div className="notes-group">
+        <input
+          aria-label="Notes"
+          placeholder=" "
+          value={notes}
+          onChange={e => setNotes(e.target.value)}
+          style={{ minWidth: 120 }}
+        />
+        <label>Notes (optional)</label>
+      </div>
+      <button className="add-btn" type="submit">Add</button>
+    </form>
+  );
+}
+
+-------------
+components\TodoItem.tsx
+// src/components/TodoItem.tsx
+import React, { useEffect, useRef, useState } from 'react';
+import type { Todo } from '../types';
+
+export default function TodoItem({
+  todo,
+  onToggle,
+  onDelete,
+  onEdit,
+}: {
+  todo: Todo;
+  onToggle: (id: string) => void;
+  onDelete: (id: string) => void;
+  onEdit: (id: string, updates: Partial<Todo>) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+
+  // Local edit state (only applied on Save)
+  const [title, setTitle] = useState(todo.title);
+  const [dueDate, setDueDate] = useState<string | null>(todo.dueDate ?? null);
+  const [notes, setNotes] = useState<string>(todo.notes ?? '');
+  const [importance, setImportance] = useState<Todo['importance']>(todo.importance);
+
+  const editInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    // initialize local state when opening edit mode (so you can cancel safely)
+    if (editing) {
+      setTitle(todo.title ?? '');
+      setDueDate(todo.dueDate ?? null);
+      setNotes(todo.notes ?? '');
+      setImportance(todo.importance ?? 'planned');
+
+      // focus after small delay to allow animation
+      const t = setTimeout(() => editInputRef.current?.focus(), 260);
+      // lock background scrolling
+      const prevOverflow = document.documentElement.style.overflow;
+      document.documentElement.style.overflow = 'hidden';
+      return () => {
+        clearTimeout(t);
+        document.documentElement.style.overflow = prevOverflow;
+      };
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing]);
+
+  // Keyboard: ESC cancels, Ctrl+Enter saves
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!editing) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        handleCancel();
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        handleSave();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [editing, title, dueDate, notes, importance]);
+
+  // Compute due status
+  const dueStatus = (() => {
+    if (!todo.dueDate) return 'future';
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const d = new Date(todo.dueDate);
+    d.setHours(0, 0, 0, 0);
+    if (d < today) return 'overdue';
+    if (d.getTime() === today.getTime()) return 'today';
+    return 'future';
+  })();
+
+  const handleOpenEdit = () => setEditing(true);
+
+  const handleSave = () => {
+    const updates: Partial<Todo> = {
+      title: title.trim() || 'Untitled task',
+      dueDate: dueDate || null,
+      notes: notes || '',
+      importance: importance || 'planned',
+    };
+    onEdit(todo.id, updates);
+    setEditing(false);
+  };
+
+  const handleCancel = () => {
+    // revert local changes and close
+    setTitle(todo.title);
+    setDueDate(todo.dueDate ?? null);
+    setNotes(todo.notes ?? '');
+    setImportance(todo.importance ?? 'planned');
+    setEditing(false);
+  };
+
+  // overlay click closes edit
+  const handleOverlayClick = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).classList.contains('todo-edit-overlay')) {
+      handleCancel();
+    }
+  };
+
+  return (
+    <>
+      {/* Original list item (keeps list layout intact) */}
+      <li
+        className={`todo-item ${todo.completed ? 'done' : ''} ${dueStatus === 'overdue' && !todo.completed ? 'overdue' : ''}`}
+        onClick={(e) => {
+          // open edit only when user clicks outside the small action buttons or checkbox
+          // if click target is button or input, ignore opening
+          const tag = (e.target as HTMLElement).tagName.toLowerCase();
+          if (tag === 'button' || tag === 'input' || (e.target as HTMLElement).closest('.actions')) return;
+          handleOpenEdit();
+        }}
+        role="article"
+        aria-label={`Task: ${todo.title}`}
+      >
+        {/* Left: Checkbox */}
+        <label className="checkbox" onClick={(e) => e.stopPropagation()}>
+          <input
+            type="checkbox"
+            checked={todo.completed}
+            onChange={() => onToggle(todo.id)}
+            aria-label={`Mark ${todo.title} as ${todo.completed ? 'not done' : 'done'}`}
+          />
+          <span className="checkmark" />
+        </label>
+
+        {/* Content */}
+        <div className="content">
+          <div className="title-row">
+            <span className="title">{todo.title}</span>
+            <span className={`importance ${todo.importance}`}>
+              {todo.importance === 'urgent' ? '🔥 Urgent' : todo.importance === 'planned' ? '📅 Planned' : '🌱 Optional'}
+            </span>
+          </div>
+
+          <div className="meta-row">
+            {todo.dueDate && <span className={`due ${dueStatus}`}>{dueStatus === 'overdue' ? '⚠️ ' : ''} Due: {todo.dueDate}</span>}
+            {todo.project && <span className="project">📂 {todo.project}</span>}
+            {todo.recurrence && todo.recurrence !== 'none' && <span className="recurrence">🔁 {todo.recurrence}</span>}
+            {todo.tags && todo.tags.length > 0 && (
+              <div className="tags">
+                {todo.tags.map((tag) => (
+                  <span key={tag} className="tag">#{tag}</span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {todo.notes && <div className="notes">📝 {todo.notes}</div>}
+
+          {todo.attachments && todo.attachments.length > 0 && (
+            <div className="attachments">
+              {todo.attachments.map((a) => (
+                <a key={a.id} href={a.url} target="_blank" rel="noopener noreferrer">📎 {a.name}</a>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Actions (small icons, shown on hover) */}
+        <div className="actions">
+          <button aria-label="Edit task" title="Edit" onClick={(e) => { e.stopPropagation(); handleOpenEdit(); }}>✎</button>
+          <button aria-label="Delete task" title="Delete" onClick={(e) => { e.stopPropagation(); onDelete(todo.id); }}>🗑</button>
+        </div>
+      </li>
+
+      {/* Expanded editing overlay + flipping card */}
+      {editing && (
+        <div className="todo-edit-overlay" onMouseDown={handleOverlayClick} role="dialog" aria-modal="true">
+          <div className="todo-expanded" role="document" onMouseDown={(e) => e.stopPropagation()}>
+            <header className="expanded-header">
+              <div className="expanded-left">
+                <label className="checkbox expanded-checkbox" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={todo.completed}
+                    onChange={() => onToggle(todo.id)}
+                    aria-label={`Mark ${todo.title} as ${todo.completed ? 'not done' : 'done'}`}
+                  />
+                  <span className="checkmark" />
+                </label>
+                <div style={{ marginLeft: 12 }}>
+                  <div className="expanded-title">
+                    <input
+                      ref={editInputRef}
+                      className="expanded-title-input"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      placeholder="Task title"
+                    />
+                  </div>
+                  <div className="expanded-sub">
+                    <span className="muted">Created: {new Date(todo.createdAt).toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="expanded-actions">
+                <button className="close-btn" onClick={handleCancel} title="Close">✖</button>
+              </div>
+            </header>
+
+            <div className="expanded-body">
+              <div className="form-row">
+                <label>Due date</label>
+                <input
+                  type="date"
+                  value={dueDate || ''}
+                  onChange={(e) => setDueDate(e.target.value || null)}
+                />
+              </div>
+
+              <div className="form-row">
+                <label>Importance</label>
+                <select value={importance} onChange={(e) => setImportance(e.target.value as Todo['importance'])}>
+                  <option value="urgent">🔥 Urgent</option>
+                  <option value="planned">📅 Planned</option>
+                  <option value="optional">🌱 Optional</option>
+                </select>
+              </div>
+
+              <div className="form-row">
+                <label>Notes</label>
+                <textarea
+                  rows={5}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Add longer notes or steps..."
+                />
+              </div>
+
+              <div className="form-row attachments-row">
+                <label>Attachments</label>
+                <div className="attachments">
+                  {todo.attachments && todo.attachments.length > 0 ? (
+                    todo.attachments.map((a) => (
+                      <a key={a.id} href={a.url} target="_blank" rel="noopener noreferrer">📎 {a.name}</a>
+                    ))
+                  ) : (
+                    <span className="muted">No attachments</span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <footer className="expanded-footer">
+              <div className="footer-left muted">Tip: Press <kbd>Esc</kbd> to cancel • <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to save</div>
+              <div className="footer-actions">
+                <button className="btn neutral" onClick={handleCancel}>Cancel</button>
+                <button className="btn save" onClick={handleSave}>Save changes</button>
+              </div>
+            </footer>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+-------------
+components\TodoList.tsx
+import TodoItem from './TodoItem';
+import type { Todo } from '../types';
+
+export default function TodoList({ todos, onToggle, onDelete, onEdit }:
+  { todos: Todo[]; onToggle: (id: string) => void; onDelete: (id: string) => void; onEdit: (id: string, updates: Partial<Todo>) => void }) {
+  if (todos.length === 0) return <div className="empty">No tasks — enjoy the calm 🌙</div>;
+  return (
+    <ul className="todo-list" role="list">
+      {todos.map(todo => (
+        <TodoItem key={todo.id} todo={todo} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} />
+      ))}
+    </ul>
+  );
+}
+
+-------------
+hooks\useLocalStorage.ts
+import { useEffect, useState } from 'react';
+
+export default function useLocalStorage<T>(key: string, initial: T) {
+  const [state, setState] = useState<T>(() => {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) as T : initial;
+    } catch {
+      return initial;
+    }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem(key, JSON.stringify(state)); } catch {}
+  }, [key, state]);
+
+  return [state, setState] as const;
+}
+
+-------------
+styles\styles.css
+/* ============================================================
+   NovaTodo — Refactored Styles (semantic tokens, theme-ready)
+   - Light theme tuned to mid-grey (lower contrast for comfort)
+   - Centralized semantic tokens replace ad-hoc rgba(...) usage
+   ============================================================ */
+
+/* ============ Fonts & Setup ============ */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap');
+
+:root {
+  /* --- Semantic color tokens (dark theme defaults) --- */
+  --bg-900: #071224;      /* deep base */
+  --bg-800: #0b1a29;      /* secondary deep */
+  --surface: rgba(255,255,255,0.03); /* raised surfaces */
+  --card: rgba(255,255,255,0.025);   /* cards / panels */
+  --border: rgba(255,255,255,0.06);  /* subtle border */
+  --glass: rgba(255,255,255,0.035);  /* glass effect */
+  --overlay: rgba(2,6,23,0.7);       /* modal overlay */
+
+  /* Text & semantic */
+  --text: #e7f2f7;
+  --muted: #9fb0bf;
+
+  /* Accent palette (semantic) */
+  --accent-1: #56f0d9; /* mint */
+  --accent-2: #7a6bff; /* violet */
+
+  /* Button text on accent gradients (dark theme uses dark-on-light) */
+  --btn-on-accent: #042428;
+
+  /* Feedback */
+  --danger: #ff7676;
+  --warning: #ffcc00;
+  --success: #4caf50;
+
+  /* Focus & shadows */
+  --focus: rgba(122,107,255,0.12);
+  --shadow-color: rgba(2,6,23,0.5);
+
+  /* Typography & sizing */
+  --ff: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+  --base-size: 15px;
+  --radius-lg: 18px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+  --gap: 14px;
+
+  /* Motion */
+  --ease-smooth: cubic-bezier(.2, .9, .25, 1);
+}
+
+/* ---------- Light theme (mid-gray / lower contrast) ---------- */
+[data-theme="light"] {
+  /* slightly darker mid-gray base (comfortable on minimal screens) */
+  --bg-900: #eceff1;   /* mid-ish gray background */
+  --bg-800: #e4e7ea;
+
+  /* surfaces are slightly darker than white but still subtle */
+  --surface: rgba(2,6,23,0.03);
+  --card: rgba(2,6,23,0.03);
+
+  /* borders and glass tuned for light */
+  --border: rgba(16,24,40,0.06);
+  --glass: rgba(2,6,23,0.02);
+  --overlay: rgba(18,24,30,0.28);
+
+  /* text */
+  --text: #121619;    /* dark but not pure black */
+  --muted: #59666f;
+
+  /* accents tuned for readability on light */
+  --accent-1: #00796b; /* teal */
+  --accent-2: #5b35d4; /* violet */
+  --btn-on-accent: #ffffff; /* white text on dense accent gradients */
+
+  /* feedback tokens */
+  --danger: #b00020;
+  --warning: #b88600;
+  --success: #2e7d32;
+
+  --focus: rgba(91,53,212,0.14);
+  --shadow-color: rgba(16,24,40,0.06);
+}
+
+/* Smooth cross-theme transitions */
+:root,
+html[data-theme],
+html {
+  transition: background .32s var(--ease-smooth), color .32s var(--ease-smooth);
+}
+
+/* Respect user motion preference */
+@media (prefers-reduced-motion: reduce) {
+  :root { --ease-smooth: cubic-bezier(.25, .25, .25, .25); }
+  * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+
+/* Base resets */
+* { box-sizing: border-box; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+html, body, #root { height: 100%; width: 100vw; overflow-x: hidden; }
+body {
+  margin: 0;
+  font-family: var(--ff);
+  font-size: var(--base-size);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+
+  /* subtle background with soft accent halos (keeps brand presence yet unobtrusive) */
+  background:
+    radial-gradient(1200px 600px at 10% 10%, rgba(122,107,255,0.06), transparent 8%),
+    radial-gradient(1000px 500px at 90% 85%, rgba(86,240,217,0.04), transparent 8%),
+    linear-gradient(180deg, var(--bg-900), var(--bg-800) 70%);
+}
+
+/* ============ App container ============ */
+.app-root {
+  width: 100%;
+  max-width: 540px;
+  margin: auto;
+  background: linear-gradient(180deg, rgba(255,255,255,0.018), var(--card));
+  border-radius: calc(var(--radius-lg) + 2px);
+  padding: 22px;
+  box-shadow: 0 10px 30px var(--shadow-color);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(8px) saturate(120%);
+  transition: transform .34s var(--ease-smooth), box-shadow .34s var(--ease-smooth);
+  transform-origin: center;
+  display: flex;
+  flex-direction: column;
+  min-height: 80vh;
+  max-height: 95vh;
+  overflow: hidden;
+  position: relative;
+}
+
+/* widen container on larger screens */
+@media (min-width: 900px) { .app-root { max-width: 1000px; } }
+@media (min-width: 1200px) { .app-root { max-width: 1200px; } }
+
+/* layout */
+.app-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+  margin: 24px 0;
+  overflow-y: auto;
+  flex-grow: 1;
+}
+@media (min-width: 900px) { .app-layout { grid-template-columns: 180px 1fr 180px; } }
+
+/* header */
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-shrink: 0;
+  padding: 12px 16px;
+  background: linear-gradient(90deg, rgba(122,107,255,0.06), rgba(86,240,217,0.03));
+  border-radius: 12px;
+}
+.app-header h1 {
+  margin: 0;
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: 0.2px;
+  background: linear-gradient(90deg, var(--accent-1), var(--accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.meta { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 10px; }
+.meta button { height:36px; padding:6px 10px; border-radius:10px; background:transparent; border:1px solid var(--border); color: var(--muted); }
+
+/* theme toggle */
+.theme-toggle {
+  display: inline-grid; place-items: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  width: 40px; height: 36px; border-radius: 10px; padding: 6px; cursor: pointer;
+  color: var(--muted);
+  transition: transform .12s var(--ease-smooth), color .14s var(--ease-smooth), background .12s var(--ease-smooth);
+}
+.theme-toggle:hover { transform: translateY(-3px); color: var(--text); background: rgba(255,255,255,0.02); }
+.theme-toggle svg { display: block; }
+
+/* mobile nav toggle */
+.mobile-menu-toggle {
+  display: block;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  width: 40px; height: 36px; border-radius: 10px; cursor: pointer; z-index: 1001;
+}
+@media (min-width: 900px) { .mobile-menu-toggle { display: none; } }
+
+/* nav panel */
+.mobile-nav-panel {
+  position: absolute; top: 0; left: 0; width: 250px; height: 100%;
+  background: var(--bg-900); box-shadow: 0 10px 30px var(--shadow-color);
+  padding: 24px; z-index: 1000; transform: translateX(-100%); transition: transform .3s var(--ease-smooth);
+  display: flex; flex-direction: column; gap: 20px;
+}
+.mobile-nav-panel h3 { margin: 0 0 8px 0; font-size: 14px; color: var(--muted); font-weight: 600; }
+.nav-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); z-index: 999; opacity: 0; pointer-events: none; transition: opacity .3s var(--ease-smooth); }
+.app-root.is-nav-open .mobile-nav-panel { transform: translateX(0); }
+.app-root.is-nav-open .nav-overlay { opacity: 1; pointer-events: auto; }
+
+/* sidebars */
+.sidebar-left, .sidebar-right { display: none; }
+@media (min-width: 900px) { .sidebar-left, .sidebar-right { display:flex; flex-direction:column; gap:12px; } }
+
+/* main content */
+.main-content { min-width:0; display:flex; flex-direction:column; gap:16px; }
+
+/* ============ Form (Add Todo) ============ */
+.todo-form {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;
+  background: var(--surface); padding: 16px; border-radius: var(--radius-md); border: 1px solid var(--border);
+}
+.todo-form input[aria-label="New todo"] {
+  flex: 1 1 100%; background: transparent; border: 0; padding: 12px 10px; color: var(--text);
+  outline: none; font-size: 16px; font-weight: 500; min-width: 0;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  border-radius: 0;
+}
+.todo-form input[aria-label="New todo"]:focus { border-bottom-color: var(--accent-2); }
+
+/* secondary controls */
+.date-group, .notes-group, .todo-form select { flex: 1 1 140px; }
+.add-btn {
+  flex-shrink: 0;
+  background: linear-gradient(90deg, var(--accent-1), var(--accent-2));
+  border: none; padding: 10px 18px; border-radius: var(--radius-sm);
+  color: var(--btn-on-accent); font-weight: 700; cursor: pointer;
+  box-shadow: 0 6px 20px rgba(122, 107, 255, 0.12);
+  transition: transform .12s var(--ease-smooth), box-shadow .12s var(--ease-smooth);
+  height: 42px;
+}
+
+/* compact mobile stacking */
+@media (max-width: 640px) {
+  .todo-form { flex-direction: column; align-items: stretch; }
+  .todo-form input[aria-label="New todo"] { flex-basis: auto; }
+}
+
+/* form inputs */
+.todo-form select, .todo-form input[type="date"], .notes-group input {
+  background: var(--surface); border: 1px solid var(--border); padding: 10px 12px; border-radius: var(--radius-sm);
+  height: 42px; color: var(--text); font-size: 14px; outline: none; width: 100%;
+}
+.todo-form select:focus, .todo-form input[type="date"]:focus, .notes-group input:focus {
+  box-shadow: 0 0 0 2px var(--accent-2); border-color: var(--accent-2);
+}
+
+/* ============ Filters, Search, and Actions ============ */
+.filters-nav { display:flex; flex-direction:column; gap:8px; }
+.filters-nav button {
+  text-align:left; padding:10px 16px; border:none; background:transparent; color:var(--muted); border-radius:8px; cursor:pointer; font-weight:500; transition: all 0.2s var(--ease-smooth);
+}
+.filters-nav button[aria-pressed="true"], .filters-nav button.active {
+  background: linear-gradient(90deg, var(--accent-1), var(--accent-2));
+  color: var(--btn-on-accent);
+  font-weight:600;
+  box-shadow: 0 8px 24px rgba(86,240,217,0.06);
+}
+.filters-nav button:hover:not(.active) { background: rgba(255,255,255,0.03); color: var(--text); }
+
+/* search */
+.search-bar input {
+  width:100%; padding:12px 16px; border-radius:12px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-size:15px;
+}
+
+/* action buttons */
+.action-buttons { display:flex; flex-direction:column; gap:8px; }
+.action-buttons button {
+  text-align:left; padding:10px 16px; border:1px solid var(--border); background:var(--surface); color:var(--muted); border-radius:8px; cursor:pointer; font-weight:500; transition: all 0.2s var(--ease-smooth);
+}
+.action-buttons button:hover { background: rgba(255,255,255,0.03); color:var(--text); transform: translateX(3px); }
+
+/* ============ Todo List & Items ============ */
+.todo-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:12px; }
+
+.todo-item {
+  display:flex; align-items:center; gap:12px; padding:14px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.008), rgba(255,255,255,0.004));
+  border-radius: var(--radius-md); border: 1px solid var(--border);
+  transition: transform .16s var(--ease-smooth), box-shadow .16s var(--ease-smooth), opacity .14s;
+  box-shadow: 0 6px 18px var(--shadow-color);
+}
+@media (hover: hover) and (pointer: fine) {
+  .todo-item:hover { transform: translateY(-4px); box-shadow: 0 10px 30px var(--shadow-color); }
+}
+
+/* checkbox */
+.todo-item .checkbox { display:flex; align-items:center; gap:10px; }
+.todo-item input[type="checkbox"] {
+  width:20px; height:20px; accent-color: var(--accent-1); cursor:pointer; border-radius:5px; border:1px solid var(--border);
+}
+
+/* content */
+.content { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
+.title { font-size:15px; font-weight:600; color:var(--text); word-break:break-word; }
+
+.todo-item.done { opacity:0.6; }
+.todo-item.done .title { text-decoration: line-through; }
+
+/* actions */
+.actions { display:flex; gap:8px; align-items:center; opacity:0; transition: opacity 0.2s ease; }
+.todo-item:hover .actions { opacity:1; }
+.actions button { background:transparent; border:0; color:var(--muted); padding:6px; border-radius:8px; cursor:pointer; font-size:15px; transition: transform .12s var(--ease-smooth), color .12s var(--ease-smooth); }
+.actions button:hover { color: var(--text); transform: translateY(-3px); }
+
+/* empty */
+.empty { padding:28px; text-align:center; color:var(--muted); font-size:15px; }
+
+/* ============ Footer ============ */
+.app-footer { display:flex; justify-content:center; padding-top:14px; color:var(--muted); font-size:12px; flex-shrink:0; margin-top:auto; }
+.futuristic-footer {
+  background: linear-gradient(90deg, rgba(86,240,217,0.12), rgba(122,107,255,0.12));
+  border-radius:14px; box-shadow: 0 2px 18px rgba(122,107,255,0.10);
+  padding:12px 24px; margin-top:24px; display:flex; align-items:center; gap:10px; justify-content:center; position:relative; overflow:hidden; font-size:14px; font-weight:600; letter-spacing:0.5px;
+  animation: footerGlow 2.8s infinite alternate;
+}
+.footer-icon { font-size:1.3em; filter: drop-shadow(0 0 6px #56f0d9); animation: iconPulse 1.8s infinite alternate; }
+.footer-text { background: linear-gradient(90deg, var(--accent-1), var(--accent-2)); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.footer-author { text-shadow: 0 0 8px #7a6bff99; font-weight:800; letter-spacing:1px; }
+@keyframes footerGlow { from { box-shadow: 0 2px 18px rgba(122, 107, 255, 0.10); } to { box-shadow: 0 2px 32px rgba(86, 240, 217, 0.22); } }
+@keyframes iconPulse { from { filter: drop-shadow(0 0 6px #56f0d9); } to { filter: drop-shadow(0 0 16px #7a6bff); } }
+
+/* ============ Accessibility & Final Tweaks ============ */
+:focus { outline: none; }
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+
+/* smaller screen */
+@media (max-width: 480px) {
+  body { padding: 8px; }
+  .app-root { padding: 12px; border-radius: var(--radius-md); }
+  .app-header h1 { font-size: 18px; }
+  .todo-item { padding: 10px; font-size: 14px; }
+}
+
+/* ===== extra small UI bits ===== */
+.tags { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+.tag {
+  background: var(--surface); padding:4px 8px; border-radius:999px; font-size:12px; color:var(--muted); border:1px solid var(--border);
+}
+.project { font-size:12px; color:var(--muted); margin-left:8px; }
+.attachments { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
+.attachments a { font-size:13px; color:var(--muted); text-decoration:none; padding:4px 8px; border-radius:8px; background:var(--surface); border:1px solid var(--border); }
+.sort-menu { display:flex; flex-direction:column; gap:8px; }
+
+button.active {
+  background: linear-gradient(90deg, var(--accent-1), var(--accent-2));
+  color: var(--btn-on-accent);
+  font-weight:600;
+  box-shadow: 0 8px 24px rgba(86, 240, 217, 0.06);
+}
+
+/* header polish (reused) */
+.app-header { padding: 12px 16px; }
+.app-header h1 { font-size: 20px; margin: 0 8px 0 0; }
+.meta { gap: 12px; align-items:center; display:flex; }
+
+/* Due badges & overdue */
+.due { padding:4px 8px; border-radius:8px; background: rgba(255,120,120,0.06); color: #ffb4b4; font-weight:600; font-size:12px; }
+.todo-item.overdue { border-left: 4px solid var(--danger); box-shadow: 0 6px 18px rgba(255,118,118,0.06); }
+
+/* host-level scrollbar tweak (token-aware) */
+::-webkit-scrollbar { width: 12px; }
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--accent-2), var(--accent-1));
+  border-radius:999px;
+  border: 3px solid rgba(0,0,0,0.12);
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  border: 3px solid rgba(255,255,255,0.85);
+}
+
+/* ============ Importance badges ============ */
+.title-row { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.importance {
+  font-size:12px; font-weight:600; padding:4px 10px; border-radius:999px; border:1px solid transparent; white-space:nowrap;
+}
+.importance.urgent { background: rgba(255,118,118,0.15); color: var(--danger); border-color: var(--danger); }
+.importance.planned { background: rgba(122,107,255,0.14); color: var(--accent-2); border-color: var(--accent-2); }
+.importance.optional { background: rgba(86,240,217,0.14); color: var(--accent-1); border-color: var(--accent-1); }
+
+/* meta row chips */
+.meta-row { display:flex; flex-wrap:wrap; gap:6px; font-size:12px; color:var(--muted); margin-top:4px; }
+.due { padding: 3px 8px; border-radius:8px; font-weight:600; }
+.due.overdue { background: rgba(255,118,118,0.15); color: var(--danger); }
+.due.today { background: rgba(255,204,0,0.15); color: var(--warning); }
+.due.future { background: rgba(86,240,217,0.15); color: var(--accent-1); }
+
+/* notes */
+.notes { margin-top:6px; font-size:13px; color:var(--muted); font-style:italic; line-height:1.4; }
+
+/* actions hover reveal */
+.actions { display:flex; gap:8px; align-items:center; opacity:0; transition: opacity 0.2s ease; }
+.todo-item:hover .actions { opacity:1; }
+
+/* checkbox custom UI */
+.checkbox { position: relative; display:flex; align-items:center; cursor:pointer; }
+.checkbox input { opacity:0; width:0; height:0; }
+.checkmark {
+  width:20px; height:20px; border-radius:6px; border:2px solid var(--muted);
+  display:flex; align-items:center; justify-content:center; transition: background 0.25s ease, border-color 0.25s ease; position:relative;
+}
+.checkbox input:checked + .checkmark {
+  background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+  border-color: transparent;
+}
+.checkmark::after {
+  content: ""; width:6px; height:12px; border: solid var(--btn-on-accent); border-width: 0 2px 2px 0;
+  transform: scale(0) rotate(45deg); transition: transform 0.25s ease;
+}
+.checkbox input:checked + .checkmark::after { transform: scale(1) rotate(45deg); }
+
+/* undo delete */
+.undo-delete { margin-top:16px; display:flex; justify-content:center; }
+.undo-delete button {
+  background: linear-gradient(90deg, var(--accent-1), var(--accent-2));
+  color: var(--btn-on-accent); font-weight:700; border:none; border-radius:999px; padding:10px 20px; cursor:pointer;
+  box-shadow: 0 6px 20px rgba(122, 107, 255, 0.25); transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.undo-delete button:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(86, 240, 217, 0.35); }
+
+/* edit form */
+.edit-form { display:flex; flex-direction:column; gap:8px; background: var(--surface); padding:12px; border-radius:10px; border:1px solid var(--border); }
+.edit-form input, .edit-form select { background: var(--surface); border:1px solid var(--border); padding:8px 10px; border-radius:6px; color:var(--text); font-size:14px; }
+
+/* edit actions */
+.edit-actions { display:flex; gap:8px; justify-content:flex-end; }
+.edit-actions button { padding:6px 12px; border-radius:6px; border:none; cursor:pointer; font-size:13px; }
+.edit-actions button:first-child {
+  background: linear-gradient(90deg, var(--accent-1), var(--accent-2)); color: var(--btn-on-accent); font-weight:700;
+}
+.edit-actions button:last-child {
+  background: var(--surface); color: var(--muted);
+}
+
+/* =========================
+   Expanded edit overlay & card
+   ========================= */
+.todo-edit-overlay {
+  position: fixed; inset: 0; z-index: 1100; display: grid; place-items: center;
+  padding: 20px; background: var(--overlay); backdrop-filter: blur(10px) saturate(130%); -webkit-backdrop-filter: blur(10px) saturate(130%);
+  transition: background .28s var(--ease-smooth), opacity .28s var(--ease-smooth);
+}
+/* card container */
+.todo-expanded {
+  width:100%; max-width:880px; max-height:90vh; display:flex; flex-direction:column; gap:18px; padding:20px;
+  border-radius: calc(var(--radius-lg) - 4px);
+  background: linear-gradient(180deg, rgba(255,255,255,0.12), var(--card));
+  border: 1px solid var(--border);
+  box-shadow: 0 28px 80px var(--shadow-color);
+  backdrop-filter: blur(6px) saturate(120%);
+  overflow: hidden; transform-origin:center; animation: nt-pop-in .42s var(--ease-smooth);
+}
+.todo-expanded .expanded-body { overflow:auto; padding-right:6px; -webkit-overflow-scrolling: touch; }
+.todo-expanded .expanded-body::-webkit-scrollbar { height:8px; width:10px; }
+.todo-expanded .expanded-body::-webkit-scrollbar-thumb {
+  border-radius:999px; background: linear-gradient(180deg, var(--accent-2), var(--accent-1)); border:2px solid rgba(0,0,0,0.12);
+}
+
+/* pop-in animation */
+@keyframes nt-pop-in {
+  0%   { transform: perspective(900px) translateY(10px) rotateX(6deg) scale(.985); opacity: 0; }
+  60%  { transform: perspective(900px) translateY(-6px) rotateX(2deg) scale(1.005); opacity: 1; }
+  100% { transform: perspective(900px) translateY(0) rotateX(0) scale(1); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) { .todo-expanded { animation:none; transform:none; } .todo-edit-overlay { transition:none; } }
+
+/* expanded header */
+.expanded-header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.expanded-left { display:flex; align-items:center; gap:12px; }
+.expanded-title-input {
+  font-size:18px; font-weight:700; color:var(--text); background:transparent; border:none; width: min(100%, 68ch); line-height:1.1; padding:6px 0;
+}
+.expanded-sub .muted { font-size:12px; color:var(--muted); }
+
+/* actions */
+.expanded-actions { display:flex; gap:8px; align-items:center; }
+.close-btn {
+  appearance:none; -webkit-appearance:none; border:none;
+  background: linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  color: var(--muted); height:40px; width:40px; border-radius:10px; display:inline-grid; place-items:center; cursor:pointer; font-size:16px;
+  transition: transform .14s var(--ease-smooth), color .14s var(--ease-smooth), box-shadow .14s var(--ease-smooth);
+  border: 1px solid var(--border);
+}
+.close-btn:hover, .close-btn:focus { transform: translateY(-3px); color: var(--text); box-shadow: 0 8px 28px rgba(122,107,255,0.12); }
+.close-btn:active { transform: translateY(-1px) scale(.995); }
+
+/* form-row */
+.form-row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+.form-row label { min-width:96px; color:var(--muted); font-size:13px; font-weight:600; }
+.form-row input[type="date"], .form-row select, .form-row textarea {
+  flex: 1 1 320px; min-width:140px; background: var(--surface); border:1px solid var(--border); padding:10px 12px; border-radius:10px; color:var(--text); font-size:14px; outline:none;
+}
+.form-row textarea { resize:vertical; min-height:110px; }
+
+/* attachments area */
+.attachments-row .attachments { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+
+/* footer */
+.expanded-footer { display:flex; justify-content:space-between; gap:12px; align-items:center; flex-shrink:0; padding-top:12px; border-top:1px solid var(--border); }
+.footer-left { color:var(--muted); font-size:13px; }
+.footer-actions { display:flex; gap:8px; align-items:center; }
+
+/* buttons */
+.btn.neutral {
+  background: transparent; color: var(--muted); border: 1px solid var(--border); padding:8px 14px; border-radius:10px; cursor:pointer; font-weight:600;
+}
+.btn.neutral:hover { color:var(--text); border-color: rgba(255,255,255,0.08); transform: translateY(-2px); }
+
+.btn.save {
+  background: linear-gradient(90deg, var(--accent-1), var(--accent-2));
+  color: var(--btn-on-accent); padding:8px 16px; border-radius:10px; font-weight:800; box-shadow: 0 8px 30px rgba(122,107,255,0.18); border:none;
+}
+
+/* accessibility focus inside expanded card */
+.todo-expanded [tabindex], .todo-expanded button, .todo-expanded input, .todo-expanded textarea, .todo-expanded select { outline:none; }
+.todo-expanded :focus-visible { box-shadow: 0 0 0 4px rgba(122,107,255,0.12); border-radius:8px; }
+
+/* small screens */
+@media (max-width:640px) {
+  .todo-expanded { padding:16px; border-radius:12px; max-width:720px; margin:0 8px; }
+  .form-row { flex-direction:column; align-items:stretch; }
+  .form-row label { min-width:auto; }
+}
+
+/* theme-specific polish for expanded card (light tweaks) */
+[data-theme="light"] .todo-expanded { border: 1px solid var(--border); box-shadow: 0 18px 40px var(--shadow-color); background: linear-gradient(180deg, rgba(255,255,255,0.9), var(--card)); }
+[data-theme="light"] .close-btn { border: 1px solid rgba(2,6,23,0.06); color: var(--muted); }
+[data-theme="light"] .form-row input[type="date"], [data-theme="light"] .form-row select, [data-theme="light"] .form-row textarea {
+  background: rgba(2,6,23,0.03); border: 1px solid rgba(2,6,23,0.06); color: var(--text);
+}
+
+/* small helper utilities */
+.muted { color: var(--muted); }
+
+/* End of file */
+
+-------------
+utils\io.ts
+// src/utils/io.ts
+import type { Todo } from '../types';
+
+export function exportTodosAsJson(todos: Todo[]) {
+  try {
+    const data = JSON.stringify(todos, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    a.href = url;
+    a.download = `todos-${ts}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    return true;
+  } catch (err) {
+    console.error('Export error', err);
+    return false;
+  }
+}
+
+export function parseTodosFile(file: File): Promise<Todo[]> {
+  return new Promise((resolve, reject) => {
+    if (!file) return reject(new Error('No file provided'));
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result as string);
+        if (!Array.isArray(parsed)) throw new Error('Invalid file format: expected an array');
+        const normalized = (parsed as any[]).map((t) => {
+          if (!t || typeof t !== 'object') return null;
+          return {
+            id: t.id ?? null,
+            title: typeof t.title === 'string' ? t.title : '',
+            completed: !!t.completed,
+            // map old `priority` -> new `importance` if needed
+            importance: t.importance ?? t.priority ?? 'planned',
+            notes: t.notes ?? '',
+            createdAt: t.createdAt ?? new Date().toISOString(),
+            dueDate: t.dueDate ?? null,
+            project: t.project ?? 'General',
+            tags: Array.isArray(t.tags) ? t.tags : (typeof t.tags === 'string' ? [t.tags] : []),
+            recurrence: t.recurrence ?? 'none',
+            attachments: Array.isArray(t.attachments) ? t.attachments.map((a: any) => ({
+              id: a.id ?? (a.name ? `${Date.now()}-${a.name}` : Date.now().toString()),
+              type: a.type ?? 'file',
+              url: a.url ?? a.link ?? '',
+              name: a.name ?? a.url ?? 'attachment',
+            })) : [],
+          } as Todo;
+        }).filter(Boolean) as Todo[];
+        resolve(normalized);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = () => reject(new Error('Failed to read file'));
+    reader.readAsText(file);
+  });
+}
+
+-------------
+utils\storage.js
+
+-------------

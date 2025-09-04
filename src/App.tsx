@@ -5,17 +5,10 @@ import ThemeToggle from './components/ThemeToggle';
 import TodoForm from './components/TodoForm';
 import TodoList from './components/TodoList';
 import { exportTodosAsJson, parseTodosFile } from './utils/io';
-import { Todo, Importance } from './types';
 
 export default function App() {
-  const [todos, setTodos] = useLocalStorage<Todo[]>('todos', []);
-  const [filter, setFilter] = useState<'all' | 'active' | 'done'>('all');
-  const [isNavOpen, setIsNavOpen] = useState(false);
-  const importInputRef = useRef<HTMLInputElement>(null);
-  const [theme, setTheme] = useLocalStorage<'dark' | 'light'>('theme', 'dark');
-  const [lastDeleted, setLastDeleted] = useState<Todo | null>(null);
-  const [sortDue, setSortDue] = useState(false);
-  const [search, setSearch] = useState('');
+  const [todos, setTodos] = useLocalStorage('todos', []);
+  const [filter, setFilter] = useState('all');
   const remaining = todos.filter(t => !t.completed).length;
 
   // NEW: State for mobile navigation
@@ -109,7 +102,7 @@ export default function App() {
     importInputRef.current?.click();
   };
 
-  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportFile = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
@@ -141,7 +134,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    const handler = (ev: KeyboardEvent) => {
+    const handler = (ev) => {
       const isMod = ev.ctrlKey || ev.metaKey;
       if (isMod && ev.key.toLowerCase() === 'k') {
         ev.preventDefault();
